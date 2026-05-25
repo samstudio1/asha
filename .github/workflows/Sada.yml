@@ -1,0 +1,74 @@
+name: Build Sada APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Give Gradle permission
+        run: chmod +x ./gradlew
+
+      - name: Rename app from SMS2WhatsApp to Sada
+        run: |
+          sed -i 's/SMS2WhatsApp/Sada/g' app/src/main/res/values/strings.xml
+          sed -i 's/SMS2WhatsApp_/Sada_/g' app/build.gradle.kts
+          sed -i 's/SMS2WhatsApp/Sada/g' app/build.gradle.kts
+
+      - name: Generate temporary keystore
+        run: |
+          keytool -genkeypair \
+            -v \
+            -keystore sada-release.jks \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -alias sada \
+            -storepass android123 \
+            -keypass android123 \
+            -dname "CN=Sada, OU=Android, O=Sada, L=Dar es Salaam, S=Dar es Salaam, C=TZ"
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease
+
+      - name: Find release APK
+        id: find_apk
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+          echo "Found APK: $APK_PATH"
+
+      - name: Sign release APK
+        run: |
+          $ANDROID_HOME/build-tools/35.0.0/apksigner sign \
+            --ks sada-release.jks \
+            --ks-key-alias sada \
+            --ks-pass pass:android123 \
+            --key-pass pass:android123 \
+            --out Sada-signed-release.apk \
+            "${{ steps.find_apk.outputs.apk_path }}"
+
+      - name: Verify APK signature
+        run: |
+          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose Sada-signed-release.apk
+
+      - name: Upload Signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sada-signed-release-apk
+          path: Sada-signed-release.apk
